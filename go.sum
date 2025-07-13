@@ -1,0 +1,6 @@
+github.com/matryer/is v1.4.1 h1:55ehd8zaGABKLXQUe2awZ99BD/PTc2ls+KV/dXphgEQ=
+github.com/matryer/is v1.4.1/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
+go.adoublef.dev v0.7.1 h1:ix4lrNhuBkJv+rRd5rMnpIrbFniGlKr7ZHRoQ7IKPx4=
+go.adoublef.dev v0.7.1/go.mod h1:kBqk0vtK3DfkRHsEv9gJQ0t1NVJpaGJzMJ+KdW2Bhn4=
+golang.org/x/sys v0.34.0 h1:H5Y5sJ2L2JRdyv7ROF1he/lPdvFsd0mJHFw2ThKHxLA=
+golang.org/x/sys v0.34.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=
