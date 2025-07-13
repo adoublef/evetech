@@ -59,7 +59,7 @@ func main() {
 		if *q {
 			opts = append(opts, xprof.Quiet)
 		}
-		defer xprof.Start(".", opts...).Stop()
+		defer xprof.Start("bench/v2", opts...).Stop()
 	}
 
 	err := run(ctx, args, getenv, stdin, stderr, stdout)
@@ -116,8 +116,8 @@ type query struct {
 
 func queries(ctx context.Context, c *http.Client, ids []int) (<-chan query, interface{ Wait() error }) {
 	g, ctx := errgroup.WithContext(ctx)
-	// g.SetLimit(100)
-	queries := make(chan query)
+	g.SetLimit(100)
+	queries := make(chan query, 1)
 	go func() {
 		for _, id := range ids {
 			g.Go(func() error {
@@ -143,7 +143,7 @@ func queries(ctx context.Context, c *http.Client, ids []int) (<-chan query, inte
 
 func records(ctx context.Context, c *http.Client, queries <-chan query) (<-chan []string, interface{ Wait() error }) {
 	g, ctx := errgroup.WithContext(ctx)
-	// g.SetLimit(100)
+	g.SetLimit(100)
 	ch := make(chan []string, 1)
 	go func() {
 		ch <- []string{

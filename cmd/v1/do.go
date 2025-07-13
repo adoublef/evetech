@@ -57,7 +57,7 @@ func main() {
 		if *q {
 			opts = append(opts, xprof.Quiet)
 		}
-		defer xprof.Start(".", opts...).Stop()
+		defer xprof.Start("bench/v1", opts...).Stop()
 	}
 
 	err := run(ctx, args, getenv, stdin, stderr, stdout)
