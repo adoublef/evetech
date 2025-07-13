@@ -121,11 +121,11 @@ func queries(ctx context.Context, c *http.Client, ids []int) (<-chan query, inte
 	go func() {
 		for _, id := range ids {
 			g.Go(func() error {
-				n, err := max(ctx, c, id)
+				max, err := max(ctx, c, id)
 				if err != nil {
 					return err
 				}
-				for i := range n {
+				for i := range max {
 					select {
 					case queries <- query{id, i + 1}:
 					case <-ctx.Done():

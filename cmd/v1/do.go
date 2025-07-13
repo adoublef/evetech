@@ -109,11 +109,11 @@ func do(ctx context.Context, c *http.Client, w io.Writer) (written int, err erro
 		"volume_total",
 	})
 	for _, id := range ids {
-		n, err := max(ctx, c, id)
+		max, err := max(ctx, c, id)
 		if err != nil {
 			return 0, err
 		}
-		for i := range n {
+		for i := range max {
 			orders, err := orders(ctx, c, id, i+1)
 			if err != nil {
 				return 0, err
