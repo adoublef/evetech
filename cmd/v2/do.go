@@ -6,7 +6,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -21,7 +20,6 @@ import (
 
 	"github.com/adoublef/evetech/internal/evetech"
 	"go.adoublef.dev/runtime/xprof"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
 )
 
@@ -86,100 +84,59 @@ func run(ctx context.Context, _ []string, _ func(string) string, _ io.Reader, _,
 }
 
 func do(ctx context.Context, c *http.Client, w io.Writer) (written int, err error) {
+	// httpClient := c
 	if c == nil {
 		c = http.DefaultClient
 	}
-	ids, err := ids(ctx, c)
-	if err != nil {
-		return 0, err
-	}
-	queries, qw := queries(ctx, c, ids)
-	records, rw := records(ctx, c, queries)
 
 	cw := csv.NewWriter(w)
-	for record := range records {
-		if err := cw.Write(record); err != nil {
+	header := []string{
+		"duration",
+		"is_buy_order",
+		"issued",
+		"location_id",
+		"min_volume",
+		"order_id",
+		"price",
+		"range",
+		"system_id",
+		"type_id",
+		"volume_remain",
+		"volume_total",
+	}
+	if err := cw.Write(header); err != nil {
+		return 0, fmt.Errorf("writing header: %w", err)
+	}
+	written++
+
+	ids, err := ids(ctx, c)
+	if err != nil {
+		return written, err
+	}
+
+	for _, id := range ids {
+		n, err := max(ctx, c, id)
+		if err != nil {
 			return written, err
 		}
-		written++
+		for i := range n {
+			orders, err := orders(ctx, c, id, i+1)
+			if err != nil {
+				return written, err
+			}
+			for _, order := range orders {
+				if err := cw.Write(order.Record()); err != nil {
+					return written, err
+				}
+				written++
+			}
+		}
 	}
 	cw.Flush()
-	if err := cmp.Or(cw.Error(), qw.Wait(), rw.Wait()); err != nil {
+	if err := cw.Error(); err != nil {
 		return 0, err
 	}
 	return written, nil
-}
-
-type query struct {
-	id, page int
-}
-
-func queries(ctx context.Context, c *http.Client, ids []int) (<-chan query, interface{ Wait() error }) {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(100)
-	queries := make(chan query, 1)
-	go func() {
-		for _, id := range ids {
-			g.Go(func() error {
-				n, err := max(ctx, c, id)
-				if err != nil {
-					return err
-				}
-				for i := range n {
-					select {
-					case queries <- query{id, i + 1}:
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				}
-				return nil
-			})
-		}
-		g.Wait()
-		close(queries)
-	}()
-	return queries, g
-}
-
-func records(ctx context.Context, c *http.Client, queries <-chan query) (<-chan []string, interface{ Wait() error }) {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(100)
-	ch := make(chan []string, 1)
-	go func() {
-		ch <- []string{
-			"duration",
-			"is_buy_order",
-			"issued",
-			"location_id",
-			"min_volume",
-			"order_id",
-			"price",
-			"range",
-			"system_id",
-			"type_id",
-			"volume_remain",
-			"volume_total",
-		}
-		for q := range queries {
-			g.Go(func() error {
-				orders, err := orders(ctx, c, q.id, q.page)
-				if err != nil {
-					return err
-				}
-				for _, order := range orders {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case ch <- order.Record():
-					}
-				}
-				return nil
-			})
-		}
-		g.Wait()
-		close(ch)
-	}()
-	return ch, g
 }
 
 func ids(ctx context.Context, c *http.Client) ([]int, error) {

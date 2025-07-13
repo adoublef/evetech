@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"os"
 	"os/signal"
@@ -59,7 +60,7 @@ func main() {
 		if *q {
 			opts = append(opts, xprof.Quiet)
 		}
-		defer xprof.Start("bench/v3", opts...).Stop()
+		defer xprof.Start("bench/v4", opts...).Stop()
 	}
 
 	err := run(ctx, args, getenv, stdin, stderr, stdout)
@@ -89,11 +90,8 @@ func do(ctx context.Context, c *http.Client, w io.Writer) (written int, err erro
 	if c == nil {
 		c = http.DefaultClient
 	}
-	ids, err := ids(ctx, c)
-	if err != nil {
-		return 0, err
-	}
-	queries, qw := queries(ctx, c, ids)
+
+	queries, qw := queries(ctx, c)
 	records, rw := records(ctx, c, queries)
 
 	cw := csv.NewWriter(w)
@@ -114,13 +112,16 @@ type query struct {
 	id, page int
 }
 
-func queries(ctx context.Context, c *http.Client, ids []int) (<-chan query, interface{ Wait() error }) {
+func queries(ctx context.Context, c *http.Client) (<-chan query, interface{ Wait() error }) {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(100)
 	queries := make(chan query, 1)
 	go func() {
-		for _, id := range ids {
+		for id, err := range ids(ctx, c) {
 			g.Go(func() error {
+				if err != nil {
+					return err
+				}
 				n, err := max(ctx, c, id)
 				if err != nil {
 					return err
@@ -162,11 +163,10 @@ func records(ctx context.Context, c *http.Client, queries <-chan query) (<-chan 
 		}
 		for q := range queries {
 			g.Go(func() error {
-				orders, err := orders(ctx, c, q.id, q.page)
-				if err != nil {
-					return err
-				}
-				for _, order := range orders {
+				for order, err := range orders(ctx, c, q.id, q.page) {
+					if err != nil {
+						return err
+					}
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
@@ -182,26 +182,40 @@ func records(ctx context.Context, c *http.Client, queries <-chan query) (<-chan 
 	return ch, g
 }
 
-func ids(ctx context.Context, c *http.Client) ([]int, error) {
+func ids(ctx context.Context, c *http.Client) iter.Seq2[int, error] {
 	url := "https://esi.evetech.net/v1/universe/regions"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	return func(yield func(int, error) bool) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil && !yield(0, err) {
+			return
+		}
+		resp, err := c.Do(req)
+		if err != nil && !yield(0, err) {
+			return
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode > 300 {
-		p, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ids: %s", string(p))
-	}
+		if resp.StatusCode > 300 {
+			p, _ := io.ReadAll(resp.Body)
+			if !yield(0, fmt.Errorf("ids: %s", string(p))) {
+				return
+			}
+		}
 
-	var ids []int
-	err = json.NewDecoder(resp.Body).Decode(&ids)
-	return ids, nil
+		d := json.NewDecoder(resp.Body)
+		if _, err := d.Token(); err != nil && !yield(0, err) {
+			return
+		}
+		for d.More() {
+			var n int
+			if err := d.Decode(&n); !yield(n, err) {
+				return
+			}
+		}
+		if _, err = d.Token(); err != nil && !yield(0, err) {
+			return
+		}
+	}
 }
 
 func max(ctx context.Context, c *http.Client, id int) (int, error) {
@@ -222,24 +236,37 @@ func max(ctx context.Context, c *http.Client, id int) (int, error) {
 	return strconv.Atoi(resp.Header.Get("x-pages"))
 }
 
-func orders(ctx context.Context, c *http.Client, id, page int) ([]evetech.Order, error) {
+func orders(ctx context.Context, c *http.Client, id, page int) iter.Seq2[evetech.Order, error] {
 	url := fmt.Sprintf("https://esi.evetech.net/v1/markets/%d/orders?page=%d", id, page)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	return func(yield func(evetech.Order, error) bool) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) // context
+		if err != nil && !yield(evetech.Order{}, err) {
+			return
+		}
+		resp, err := c.Do(req)
+		if err != nil && !yield(evetech.Order{}, err) {
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode > 300 {
+			p, _ := io.ReadAll(resp.Body)
+			if !yield(evetech.Order{}, fmt.Errorf("orders: %s", string(p))) {
+				return
+			}
+		}
 
-	if resp.StatusCode > 300 {
-		p, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ids: %s", string(p))
+		d := json.NewDecoder(resp.Body)
+		if _, err := d.Token(); err != nil && !yield(evetech.Order{}, err) {
+			return
+		}
+		for d.More() {
+			var o evetech.Order
+			if err := d.Decode(&o); !yield(o, err) {
+				return
+			}
+		}
+		if _, err = d.Token(); err != nil && !yield(evetech.Order{}, err) {
+			return
+		}
 	}
-
-	var orders []evetech.Order
-	err = json.NewDecoder(resp.Body).Decode(&orders)
-	return orders, nil
 }

@@ -111,7 +111,7 @@ func do(ctx context.Context, c *http.Client, w io.Writer) (written int, err erro
 	for _, id := range ids {
 		n, err := max(ctx, c, id)
 		if err != nil {
-			return 0, nil
+			return 0, err
 		}
 		for i := range n {
 			orders, err := orders(ctx, c, id, i+1)
