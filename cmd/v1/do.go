@@ -119,20 +119,7 @@ func do(ctx context.Context, c *http.Client, w io.Writer) (written int, err erro
 				return 0, err
 			}
 			for _, order := range orders {
-				records = append(records, []string{
-					strconv.Itoa(order.Duration),
-					strconv.FormatBool(order.IsBuyOrder),
-					order.Issued,
-					strconv.FormatInt(order.LocationID, 10),
-					strconv.Itoa(order.MinVolume),
-					strconv.FormatInt(order.OrderID, 10),
-					strconv.FormatFloat(order.Price, 'f', -1, 64),
-					order.Range,
-					strconv.FormatInt(order.SystemID, 10),
-					strconv.Itoa(order.TypeID),
-					strconv.Itoa(order.VolumeRemain),
-					strconv.Itoa(order.VolumeTotal),
-				})
+				records = append(records, order.Record())
 			}
 		}
 	}
