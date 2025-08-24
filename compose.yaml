@@ -1,0 +1,191 @@
+# Copyright 2025 The Mosaic Authors. All rights reserved.
+#
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
+volumes:
+  postgres_data:
+  tempo_data:
+
+
+services:
+  evetech:
+    image: adoublef/evetech:0.1.0
+    build:
+      context: .
+      args:
+        - APP_NAME=evetech
+      platforms:
+        - linux/arm64
+        - linux/amd64
+    command: [ "serve", "--database-url", "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable" ]
+    environment:
+      - VIRTUAL_PROTO=http
+      - VIRTUAL_HOST=evetech.localhost
+      - VIRTUAL_PORT=8080
+      - OTEL_EXPORTER_OTLP_INSECURE=true # use http instead of https (needed because of https://github.com/open-telemetry/opentelemetry-go/issues/4834)
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=evetech,service.namespace=evetech,deployment.environment=development
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+    ports:
+      - "8080" # api
+    cap_drop:
+      - NET_ADMIN
+      - SYS_ADMIN
+    # https://stackoverflow.com/a/73000142/4239443
+    deploy:
+      replicas: 1 # configurable
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      # resources:
+      #   limits:
+      #     cpus: "0.50"
+      #     memory: 50M
+      #     # pids: 1
+      #   reservations:
+      #     cpus: "0.25"
+      #     memory: 20M
+    healthcheck:
+      test: [ "CMD", "a.out", "health", "http://0.0.0.0:8080/ready" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # docker proxy
+  nginx:
+    container_name: nginx
+    image: nginxproxy/nginx-proxy:1.8.0-alpine
+    ports:
+      - "80:80" # todo: https
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+
+  postgres:
+    container_name: postgres
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432" # sql
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:rw
+
+  adminer:
+    container_name: adminer
+    image: adminer:5.3.0-standalone
+    environment:
+      - VIRTUAL_PROTO=http
+      - VIRTUAL_HOST=adminer.localhost
+      - VIRTUAL_PORT=8080
+      - ADMINER_DEFAULT_SERVER=postgres
+    ports:
+      - "8080" # dashboard
+
+  postgres-exporter:
+    container_name: postgres-exporter
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      - DATA_SOURCE_URI=postgres:5432/postgres?sslmode=disable
+      - DATA_SOURCE_USER=postgres
+      - DATA_SOURCE_PASS=postgres
+    ports:
+      - "9187" # metrics
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:12.1.0
+    environment:
+      - VIRTUAL_PROTO=http
+      - VIRTUAL_HOST=grafana.localhost
+      - VIRTUAL_PORT=3000
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor traceQLStreaming metricsSummary
+    ports:
+      - "3000" #dashboard
+    volumes:
+      - ./etc/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./etc/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+
+  collector:
+    container_name: collector
+    image: otel/opentelemetry-collector:0.103.0
+    command:
+      - --config=/etc/collector.yaml
+    volumes:
+      - ./etc/opentelemetry/collector/collector.yaml:/etc/collector.yaml:ro
+      # - prometheusremotewrite_data:/var/prometheus:rw
+    ports:
+      - "4317" # grpc
+      - "4318" # http
+      - "9090" # metrics
+    # depends_on:
+    #   - collector-init
+
+    # Tempo runs as user 10001, and docker compose creates the volume as root.
+    # As such, we need to chown the volume in order for Tempo to start correctly.
+  tempo-init:
+    container_name: tempo-init
+    image: &tempoImage grafana/tempo:2.8.2
+    user: root
+    entrypoint:
+      - "chown"
+      - "10001:10001"
+      - "/var/tempo"
+    volumes:
+      - tempo_data:/var/tempo:rw
+  tempo:
+    container_name: tempo
+    image: *tempoImage
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./etc/grafana/tempo/tempo.yaml:/etc/tempo.yaml
+      - tempo_data:/var/tempo:rw
+    ports:
+      # - "14268" # jaeger ingest
+      - "3200" # tempo
+      - "9095" # tempo grpc
+      - "4317" # otlp grpc
+      - "4318" # otlp http
+      # - "9411" # zipkin
+    depends_on:
+      - tempo-init
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus.yaml
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+      - --enable-feature=native-histograms
+    ports:
+      - "9090" # http
+    volumes:
+      - ./etc/prometheus/prometheus.yaml:/etc/prometheus.yaml:ro
+
+  loki:
+    container_name: loki
+    image: grafana/loki:3.5.3
+    command: "--config.file=/etc/loki/loki.yaml"
+    volumes:
+      - ./etc/grafana/loki:/etc/loki:ro
+    ports:
+      - "3100" # api
+      - "7946" # ?
+      - "9095" # http
+      - "9096" # grpc
+
+  promtail:
+    container_name: promtail
+    image: grafana/promtail:3.5.3
+    command: "--config.file=/etc/promtail/promtail.yaml"
+    volumes:
+      - ./etc/grafana/promtail:/etc/promtail:ro
