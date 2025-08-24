@@ -1,16 +1,16 @@
 create table "order" (
-    duration integer
+    duration bigint
     , is_buy_order boolean
     , issued text
-    , location_id integer
-    , min_volume integer
-    , order_id integer
+    , location_id bigint
+    , min_volume bigint
+    , order_id bigint
     , price double precision
     , range text
-    , system_id integer
-    , type_id integer
-    , volume_remain integer
-    , volume_total integer
+    , system_id bigint
+    , type_id bigint
+    , volume_remain bigint
+    , volume_total bigint
 );
 
 ---- create above / drop below ----

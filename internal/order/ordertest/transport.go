@@ -3,7 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package evetechtest
+package ordertest
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/adoublef/evetech/internal/evetech"
+	"github.com/adoublef/evetech/internal/order"
 )
 
 type Transporter struct{}
@@ -43,7 +43,7 @@ func (tt *Transporter) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/v1/markets/") && strings.HasSuffix(req.URL.Path, "/orders"):
 		// orders endpoint
-		orders := []evetech.Order{
+		orders := []order.Order{
 			{OrderID: 1, Price: 123.45},
 			{OrderID: 2, Price: 234.56},
 		}

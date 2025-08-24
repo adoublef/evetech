@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/adoublef/evetech/internal/net/http/httpping"
 	"github.com/adoublef/evetech/internal/order"
@@ -50,7 +51,7 @@ func Handler(d0, d1, d2, d3 DB) http.Handler {
 		panic("d.RWC not set")
 	}
 
-	handleFunc("GET /ready", httpping.Handler(p, 0))
+	handleFunc("GET /ready", httpping.Handler(p, 60*time.Second))
 
 	handleFunc("/v0/orders", handleAdd(d0, "v0"))
 	handleFunc("/v1/orders", handleAdd(d1, "v1"))
