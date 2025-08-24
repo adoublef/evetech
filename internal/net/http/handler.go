@@ -7,14 +7,20 @@ package http
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
+	"github.com/adoublef/evetech/internal/net/http/httpping"
 	"github.com/adoublef/evetech/internal/order"
 	"go.adoublef.dev/net/xhttp"
 	olog "go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 )
+
+type Server = http.Server
+
+func IsServerClosed(err error) bool { return errors.Is(err, http.ErrServerClosed) }
 
 const scopeName = "github.com/adoublef/evetech/internal/net/http"
 
@@ -35,6 +41,16 @@ func Handler(d0, d1, d2, d3 DB) http.Handler {
 		h = otelhttp.WithRouteTag(pattern, h)
 		mux.Handle(pattern, h)
 	}
+
+	// NOTE: I know i can get the raw connection, but this is hacky
+	var p httpping.Pinger
+	if d, ok := d0.(*order.DB); ok {
+		p = d.RWC
+	} else {
+		panic("d.RWC not set")
+	}
+
+	handleFunc("GET /ready", httpping.Handler(p, 0))
 
 	handleFunc("/v0/orders", handleAdd(d0, "v0"))
 	handleFunc("/v1/orders", handleAdd(d1, "v1"))
