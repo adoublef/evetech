@@ -19,3 +19,27 @@ tasks:
       - tidy
     cmd: |
       DEBUG=1 go test -race -count=1 -cover -timeout=60s {{.CLI_ARGS}}
+
+  up:
+    desc: run services
+    deps:
+      - down
+    cmd: |
+      docker compose up -d --build --force-recreate {{.CLI_ARGS}}
+
+  down:
+    desc: stop services
+    cmd: |
+      docker compose down --volumes {{.CLI_ARGS}}
+
+  logs:
+    desc: run logs
+    cmd: |
+      docker compose logs -f {{.CLI_ARGS}}
+
+  migrate:
+    desc: run migration
+    cmd: |
+      docker compose run --rm evetech migrate --database-url $DATABASE_URL {{.CLI_ARGS}}
+    env:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable

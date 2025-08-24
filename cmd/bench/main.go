@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -16,7 +17,6 @@ import (
 	"sync/atomic"
 
 	"github.com/adoublef/evetech/internal/order"
-	"go.adoublef.dev/runtime/xprof"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
 )
@@ -30,33 +30,8 @@ func main() {
 		stdin  = os.Stdin
 		stderr = os.Stderr
 		stdout = os.Stdout
+		args   = os.Args[1:]
 	)
-
-	mode := flag.String("mode", "", xprof.Usage)
-	q := flag.Bool("q", false, "quite mode")
-	flag.Parse()
-
-	args := flag.Args()
-
-	var (
-		opts []func(*xprof.Prof)
-	)
-	switch *mode {
-	case "cpu":
-		opts = append(opts, xprof.CPU)
-	case "heap": // To find memory leaks or high memory usage
-		opts = append(opts, xprof.Mem)
-	case "alloc": // To optimize allocation rates (reduce GC pressure)
-		opts = append(opts, xprof.MemAllocs)
-	case "trace":
-		opts = append(opts, xprof.Trace)
-	}
-	if len(opts) > 0 {
-		if *q {
-			opts = append(opts, xprof.Quiet)
-		}
-		defer xprof.Start("bench/v4", opts...).Stop()
-	}
 
 	err := run(ctx, args, getenv, stdin, stderr, stdout)
 	if errors.Is(err, flag.ErrHelp) {
@@ -85,10 +60,23 @@ func do(ctx context.Context, c *http.Client, endpoint string) (int, error) {
 	if c == nil {
 		c = http.DefaultClient
 	}
+	// c.Timeout = 15 * time.Second
+	// if t, ok := c.Transport.(*http.Transport); ok {
+	// 	t.MaxIdleConns = 100
+	// 	t.MaxIdleConnsPerHost = 10
+	// 	t.IdleConnTimeout = 90 * time.Second
+	// 	t.DialContext = (&net.Dialer{
+	// 		Timeout:   10 * time.Second,
+	// 		KeepAlive: 30 * time.Second,
+	// 	}).DialContext
+	// 	t.TLSHandshakeTimeout = 10 * time.Second
+	// 	t.ResponseHeaderTimeout = 10 * time.Second
+	// 	t.ExpectContinueTimeout = 1 * time.Second
+	// }
 
-	queries, g1 := queries(ctx, c, 50)
+	queries, g1 := queries(ctx, c, 10)
 	entries, g2 := entries(ctx, c, queries, 50)
-	written, g3 := collect(ctx, c, endpoint, entries, 50)
+	written, g3 := collect(ctx, c, endpoint, entries, 40)
 	// ERR: Post "http://evetech.localhost/v2/orders": dial tcp 127.0.0.1:80: connect: can't assign requested address
 	if err := cmp.Or(g1.Wait(), g2.Wait(), g3.Wait()); err != nil {
 		return int(written), err
@@ -117,6 +105,7 @@ func ready(ctx context.Context, c *http.Client, endpoint string) error {
 	if err != nil {
 		return err
 	}
+	req.Close = true
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Do(req)
@@ -135,22 +124,26 @@ func ready(ctx context.Context, c *http.Client, endpoint string) error {
 }
 
 func post(ctx context.Context, c *http.Client, endpoint string, o order.Order) error {
-	pr, pw := io.Pipe()
-	defer pr.Close()
+	// pr, pw := io.Pipe()
+	// defer pr.Close()
 
-	go func() {
-		defer pw.Close()
-		if err := json.NewEncoder(pw).Encode(o); err != nil {
-			pw.CloseWithError(err)
-		}
-	}()
+	// go func() {
+	// 	defer pw.Close()
+	// 	if err := json.NewEncoder(pw).Encode(o); err != nil {
+	// 		pw.CloseWithError(err)
+	// 	}
+	// }()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pr)
+	p, err := json.Marshal(o)
 	if err != nil {
 		return err
 	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(p))
+	if err != nil {
+		return err
+	}
+	req.Close = true
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := c.Do(req)
 	if err != nil {
 		return err
@@ -233,6 +226,7 @@ func ids(ctx context.Context, c *http.Client) iter.Seq2[int, error] {
 		if err != nil && !yield(0, err) {
 			return
 		}
+		req.Close = true
 		resp, err := c.Do(req)
 		if err != nil && !yield(0, err) {
 			return
@@ -268,6 +262,7 @@ func max(ctx context.Context, c *http.Client, id int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	req.Close = true
 	resp, err := c.Do(req)
 	if err != nil {
 		return 0, err
@@ -287,6 +282,7 @@ func orders(ctx context.Context, c *http.Client, id, page int) iter.Seq2[order.O
 		if err != nil && !yield(order.Order{}, err) {
 			return
 		}
+		req.Close = true
 		resp, err := c.Do(req)
 		if err != nil && !yield(order.Order{}, err) {
 			return
